@@ -243,12 +243,9 @@ func (t *Table) WriteMessageResult(id string, seq int, res MessageResult) error 
 	if err != nil {
 		return err
 	}
-	prev, ok := inv.lastBatch[seq]
-	if ok && prev.Status == MessagePending {
-		inv.Messages[seq] = prev
-		inv.lastBatch[seq] = res
-		return nil
-	}
+	// Persist the freshly computed result. Do not substitute the prior
+	// lastBatch entry (e.g. a stale pending snapshot), otherwise a retried
+	// command that has just succeeded regresses back to pending.
 	inv.Messages[seq] = res
 	inv.lastBatch[seq] = res
 	return nil

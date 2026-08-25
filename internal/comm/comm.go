@@ -19,7 +19,6 @@ type Client struct {
 	sessions            map[string]*Session
 	lastSeqSig          map[string]uint64
 	batchSnapshots      []int
-	overwrittenMessages int
 	seq                 int
 	mu                  sync.Mutex
 }
@@ -217,34 +216,29 @@ func (c *Client) Enqueue(invID string, seq int, kind string, payload []byte) err
 }
 
 func (c *Client) ProcessBatch(batch []inverter.QueuedMessage) ([]inverter.MessageResult, error) {
-	snapshot := c.table.MessageStatusesFor(batch)
 	c.batchSnapshots = append(c.batchSnapshots, len(batch))
 	results := make([]inverter.MessageResult, 0, len(batch))
 	for _, msg := range batch {
+		// Write back the fresh processing result for every message as it is
+		// handled. This must be the just-computed result, never a snapshot of
+		// the prior batch state — otherwise already-sent commands regress to
+		// pending and boundary messages that succeeded before a later failure
+		// are lost from the message table.
 		var res inverter.MessageResult
 		if err := c.SendCommand(msg.InverterID, inverter.Command(msg.Kind), msg.Payload); err != nil {
 			res = inverter.MessageResult{Status: inverter.MessageFailed, ErrText: err.Error(), At: time.Now().Unix()}
 			results = append(results, res)
-			_ = c.table.WriteMessageResult(msg.InverterID, msg.Seq, res)
+			if err := c.table.WriteMessageResult(msg.InverterID, msg.Seq, res); err != nil {
+				return results, err
+			}
 			return results, err
 		}
 		res = inverter.MessageResult{Status: inverter.MessageSent, At: time.Now().Unix()}
 		results = append(results, res)
-	}
-	overwritten := 0
-	for _, msg := range batch {
-		old := snapshot[msg.Seq]
-		if old.Status == "" {
-			old = inverter.MessageResult{Status: inverter.MessagePending}
-		}
-		if old.Status != inverter.MessageSent {
-			overwritten++
-		}
-		if err := c.table.WriteMessageResult(msg.InverterID, msg.Seq, old); err != nil {
+		if err := c.table.WriteMessageResult(msg.InverterID, msg.Seq, res); err != nil {
 			return results, err
 		}
 	}
-	c.overwrittenMessages += overwritten
 	return results, nil
 }
 
