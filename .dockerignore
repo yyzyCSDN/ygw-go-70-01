@@ -1,0 +1,12 @@
+.git
+.claude
+.verification-cache
+evidence
+workspaces
+cases
+private_oracles
+runner
+staging
+verify-workspaces
+*.exe
+*.log
