@@ -303,7 +303,12 @@ func (h *Hub) IngestWith(name string, raw []byte) (*inverter.Frame, error) {
 	if _, err := h.Client(name); err != nil {
 		return nil, err
 	}
-	frame, _ := ParseFrame(raw)
+	frame, err := ParseFrame(raw)
+	if err != nil {
+		// An empty or malformed frame must yield an explicit error result
+		// rather than a nil frame that callers would dereference and panic on.
+		return nil, err
+	}
 	h.droppedFrames = append(h.droppedFrames, raw)
 	h.lastFrame = frame
 	return frame, nil
