@@ -51,3 +51,41 @@ func TestDistribute(t *testing.T) {
 		t.Fatalf("assignments = %d, want 2", len(assignments))
 	}
 }
+
+type fakeDispatcher struct {
+	dispatched []int
+}
+
+func (f *fakeDispatcher) DispatchTarget(targetW int) error {
+	f.dispatched = append(f.dispatched, targetW)
+	return nil
+}
+
+// TestUpdateIrradianceRefreshesTarget guards against the regression where a
+// change in irradiance between two non-zero values (e.g. 900 -> 400) did not
+// refresh the power target: the old code recomputed the target from a stale
+// "last" irradiance and short-circuited, so the inverter kept limiting to the
+// old target and the plant under-produced.
+func TestUpdateIrradianceRefreshesTarget(t *testing.T) {
+	d := &fakeDispatcher{}
+	m := NewManager(350000, d)
+
+	if err := m.UpdateIrradiance(900); err != nil {
+		t.Fatalf("UpdateIrradiance(900): %v", err)
+	}
+	if m.Target() != 315000 {
+		t.Fatalf("after 900 target = %d, want 315000", m.Target())
+	}
+
+	// Irradiance drops to 400. The target must immediately follow the new
+	// irradiance and the new target must be dispatched to the inverters.
+	if err := m.UpdateIrradiance(400); err != nil {
+		t.Fatalf("UpdateIrradiance(400): %v", err)
+	}
+	if m.Target() != 140000 {
+		t.Fatalf("after 400 target = %d, want 140000", m.Target())
+	}
+	if len(d.dispatched) != 2 || d.dispatched[1] != 140000 {
+		t.Fatalf("dispatched = %v, want final dispatch of 140000", d.dispatched)
+	}
+}

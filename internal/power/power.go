@@ -9,12 +9,11 @@ type Dispatcher interface {
 }
 
 type Manager struct {
-	capacityW         int
-	irradiance        int
-	lastIrrad         int
-	pendingIrradiance int
-	targetW           int
-	dispatch          Dispatcher
+	capacityW  int
+	irradiance int
+	lastIrrad  int
+	targetW    int
+	dispatch   Dispatcher
 }
 
 func NewManager(capacityW int, dispatch Dispatcher) *Manager {
@@ -26,28 +25,24 @@ func (m *Manager) UpdateIrradiance(wm2 int) error {
 		return ErrIrradianceInvalid
 	}
 	m.irradiance = wm2
-	m.pendingIrradiance = wm2
 	return m.refresh()
 }
 
 func (m *Manager) Tick() error {
-	m.lastIrrad = m.irradiance
-	m.pendingIrradiance = 0
+	// Re-evaluate the target on every tick using the latest irradiance so
+	// that changes observed since the last refresh are reflected even when
+	// the irradiance was set by a path that did not immediately dispatch.
 	return m.refresh()
 }
 
 func (m *Manager) refresh() error {
-	irradiance := m.lastIrrad
-	if irradiance == 0 && m.pendingIrradiance != 0 {
-		irradiance = m.pendingIrradiance
-	}
+	irradiance := m.irradiance
 	target := computeTarget(m.capacityW, irradiance)
 	if target == m.targetW {
 		return nil
 	}
 	m.targetW = target
 	m.lastIrrad = irradiance
-	m.pendingIrradiance = 0
 	if m.dispatch != nil {
 		return m.dispatch.DispatchTarget(target)
 	}
