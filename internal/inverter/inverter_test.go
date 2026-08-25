@@ -1,6 +1,9 @@
 package inverter
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestStateTransitions(t *testing.T) {
 	if !CanTransition(StateStopped, StateStarting) {
@@ -55,5 +58,43 @@ func TestCatalogDefaults(t *testing.T) {
 	}
 	if len(catalog.List()) != 3 {
 		t.Fatalf("catalog size = %d, want 3", len(catalog.List()))
+	}
+}
+
+// TestMarkGridResultReflectsError is the regression for the swallowed-error
+// bug: passing an error must leave the inverter off-grid and record it, while
+// a nil error must mark it on-grid. The old implementation ignored err and
+// always marked on-grid.
+func TestMarkGridResultReflectsError(t *testing.T) {
+	table := NewTable()
+	if err := table.Register(&Inverter{ID: "inv1", Serial: "S1", Model: "PV-100K"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	gridErr := errors.New("pvcontrol: grid sync failed")
+	if err := table.MarkGridResult("inv1", gridErr); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	inv, _ := table.Get("inv1")
+	if inv.GridState != GridOffGrid {
+		t.Fatalf("grid state after error = %s, want off-grid", inv.GridState)
+	}
+	if inv.LastGridErr != gridErr.Error() {
+		t.Fatalf("last grid err = %q, want %q", inv.LastGridErr, gridErr.Error())
+	}
+	if inv.GridErrCount != 1 {
+		t.Fatalf("grid err count = %d, want 1", inv.GridErrCount)
+	}
+
+	// A subsequent success must clear the error and move on-grid.
+	if err := table.MarkGridResult("inv1", nil); err != nil {
+		t.Fatalf("mark success: %v", err)
+	}
+	inv, _ = table.Get("inv1")
+	if inv.GridState != GridOnGrid {
+		t.Fatalf("grid state after success = %s, want on-grid", inv.GridState)
+	}
+	if inv.LastGridErr != "" {
+		t.Fatalf("last grid err after success = %q, want empty", inv.LastGridErr)
 	}
 }

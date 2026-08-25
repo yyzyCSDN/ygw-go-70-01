@@ -2,6 +2,7 @@ package grid
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 
 	"pvcontrol/internal/comm"
@@ -19,6 +20,11 @@ const (
 
 var ErrSyncFailed = errors.New("pvcontrol: grid sync failed")
 var ErrNoSequence = errors.New("pvcontrol: no switch sequence for inverter")
+
+// maxSyncRetries is the number of grid-sync attempts Connect makes before
+// giving up. Retrying absorbs transient comm drops instead of declaring a
+// hard failure on the first missed ack.
+const maxSyncRetries = 3
 
 type CommPort interface {
 	SyncGrid(invID string) error
@@ -74,28 +80,48 @@ func (m *Manager) SequenceOf(invID string) (comm.SwitchSequence, error) {
 func (m *Manager) markConnected(invID string) {
 	m.states[invID] = StateOnGrid
 	m.lastErr[invID] = nil
+	delete(m.hiddenFailures, invID)
+	delete(m.hiddenCount, invID)
 	_ = m.table.MarkGridResult(invID, nil)
 }
 
-func (m *Manager) markConnectedWithErr(invID string, err error) {
-	m.states[invID] = StateOnGrid
-	m.lastErr[invID] = nil
+// markSyncFailed records that grid sync failed: the inverter stays off-grid,
+// the error is surfaced via LastError and the inverter table, and the hidden
+// failure counters are incremented so operators can see repeated attempts.
+func (m *Manager) markSyncFailed(invID string, err error) {
+	m.states[invID] = StateOffGrid
+	m.lastErr[invID] = err
 	m.hiddenFailures[invID] = err
 	m.hiddenCount[invID]++
-	_ = m.table.MarkGridResult(invID, nil)
+	_ = m.table.MarkGridResult(invID, err)
 }
 
+// HiddenFailures returns the number of grid-sync failures that have been
+// recorded for an inverter without a subsequent successful connect. It lets
+// operators tell a silent retry storm from a healthy link.
+func (m *Manager) HiddenFailures(invID string) int {
+	return m.hiddenCount[invID]
+}
+
+// Connect attempts to bring an inverter onto the grid. Sync failures are
+// retried up to maxSyncRetries times; if every attempt fails the inverter is
+// left off-grid and the underlying error is returned rather than swallowed.
 func (m *Manager) Connect(invID string) error {
 	if _, err := m.table.Get(invID); err != nil {
 		return err
 	}
 	m.states[invID] = StateSyncing
-	if err := m.comm.SyncGrid(invID); err != nil {
-		m.markConnectedWithErr(invID, err)
-		return nil
+	var lastErr error
+	for attempt := 1; attempt <= maxSyncRetries; attempt++ {
+		err := m.comm.SyncGrid(invID)
+		if err == nil {
+			m.markConnected(invID)
+			return nil
+		}
+		lastErr = err
+		m.markSyncFailed(invID, err)
 	}
-	m.markConnected(invID)
-	return nil
+	return fmt.Errorf("pvcontrol: inverter %s grid connect failed after %d attempts: %w", invID, maxSyncRetries, lastErr)
 }
 
 func (m *Manager) Disconnect(invID string) error {

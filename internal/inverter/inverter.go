@@ -112,6 +112,12 @@ func (t *Table) MarkGridResult(id string, err error) error {
 	if lookupErr != nil {
 		return lookupErr
 	}
+	if err != nil {
+		inv.GridState = GridOffGrid
+		inv.LastGridErr = err.Error()
+		inv.GridErrCount++
+		return nil
+	}
 	inv.GridState = GridOnGrid
 	inv.LastGridErr = ""
 	return nil
