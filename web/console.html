@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>光伏电站逆变器群控台</title>
+<style>
+body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; background: #f4f6f8; color: #1f2933; }
+h1 { font-size: 22px; }
+.card { background: #ffffff; border: 1px solid #d9e2ec; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d9e2ec; padding: 8px; text-align: left; }
+button { margin-right: 8px; }
+.metric { display: inline-block; margin-right: 32px; font-size: 18px; }
+</style>
+</head>
+<body>
+<h1>光伏电站逆变器群控台</h1>
+<div class="card">
+  <span class="metric" id="irradiance">辐照：-</span>
+  <span class="metric" id="target">功率目标：-</span>
+  <button onclick="refresh()">刷新</button>
+</div>
+<div class="card">
+  <table id="inv-table">
+    <thead>
+      <tr><th>ID</th><th>序列号</th><th>型号</th><th>状态</th><th>并网</th><th>输出(W)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script>
+function refresh() {
+  fetch("/api/v1/inverters").then(function (resp) { return resp.json(); }).then(function (rows) {
+    var body = document.querySelector("#inv-table tbody");
+    body.innerHTML = "";
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var fields = [row.id, row.serial, row.model, row.state, row.grid_state, String(row.output_w)];
+      fields.forEach(function (value) {
+        var td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  });
+}
+function loadMetrics() {
+  fetch("/api/v1/forecast").then(function (resp) { return resp.json(); }).then(function (data) {
+    document.getElementById("irradiance").textContent = "辐照：" + data.average + " W/m2";
+  });
+  fetch("/api/v1/inverters").then(function (resp) { return resp.json(); }).then(function (rows) {
+    var total = 0;
+    rows.forEach(function (row) { total += row.output_w; });
+    document.getElementById("target").textContent = "输出合计：" + total + " W";
+  });
+}
+refresh();
+loadMetrics();
+</script>
+</body>
+</html>
